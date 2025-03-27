@@ -1,58 +1,52 @@
 #!/usr/bin/env python
 """
-Text to Video Generator
------------------------
-This script converts text input into a video with subtitles,
-using free images from Unsplash or Pexels as background.
+Simple Text-to-Video Generator using OpenCV
+-------------------------------------------
+This script creates videos from text input with subtitles 
+and background images using only OpenCV.
 """
 
 import os
-import textwrap
+import sys
 import argparse
+import textwrap
 import random
-import re
-from typing import List, Dict, Tuple
 import time
 import requests
-import json
-from io import BytesIO
-from PIL import Image
 import cv2
 import numpy as np
-from moviepy.editor import (
-    TextClip, ImageClip, CompositeVideoClip, concatenate_videoclips
-)
-from moviepy.video.fx.all import fadein, fadeout
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 
-class TextToVideoGenerator:
-    """Generate videos from text with beautiful subtitles and free background images."""
+class SimpleTextToVideo:
+    """Generate videos from text with basic subtitles and background images."""
     
     def __init__(self, 
-                 font: str = "Arial-Bold",  # Changed to a more common font
-                 font_size: int = 50,
-                 output_size: tuple = (1920, 1080),
-                 subtitle_color: str = 'white',
-                 temp_dir: str = "temp"):
+                 output_size=(1280, 720),
+                 font_path=None,
+                 font_size=40,
+                 subtitle_color=(255, 255, 255),
+                 temp_dir="temp"):
         """
         Initialize the text to video generator.
         
         Args:
-            font: Font name for subtitles
-            font_size: Font size for subtitles
             output_size: Video resolution (width, height)
-            subtitle_color: Color of the subtitle text
+            font_path: Path to TTF font file (or None to use default)
+            font_size: Font size for subtitles
+            subtitle_color: Color of the subtitle text as RGB tuple
             temp_dir: Directory to store temporary files
         """
-        self.font = font
-        self.font_size = font_size
         self.output_size = output_size
+        self.font_path = font_path
+        self.font_size = font_size
         self.subtitle_color = subtitle_color
         self.temp_dir = temp_dir
         
         # Create temp directory if it doesn't exist
         os.makedirs(self.temp_dir, exist_ok=True)
     
-    def parse_text(self, text: str, max_words_per_segment: int = 15) -> List[str]:
+    def parse_text(self, text, max_words_per_segment=15):
         """
         Parse input text into segments for subtitles.
         
@@ -88,9 +82,9 @@ class TextToVideoGenerator:
         
         return segments
     
-    def fetch_images(self, keywords: List[str], num_images: int = 10) -> List[str]:
+    def fetch_images(self, keywords, num_images=10):
         """
-        Fetch image URLs from free sources without API keys.
+        Fetch image URLs from free sources.
         
         Args:
             keywords: List of keywords to search for images
@@ -99,107 +93,11 @@ class TextToVideoGenerator:
         Returns:
             List of image URLs
         """
-        image_urls = []
-        query = "+".join(keywords)
-        
-        # Sources that don't require API keys
-        sources = [
-            "pixabay",
-            "pexels_free",
-            "unsplash_free",
-            "picsum"
-        ]
-        
-        try:
-            # 1. Try Pixabay (no API key required for search, only for download)
-            if "pixabay" in sources and len(image_urls) < num_images:
-                try:
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                    }
-                    search_url = f"https://pixabay.com/images/search/{query}/"
-                    response = requests.get(search_url, headers=headers)
-                    
-                    # Basic parsing to extract image URLs
-                    if response.status_code == 200:
-                        # Find image URLs in the HTML response
-                        import re
-                        img_pattern = r'img srcset="(https://cdn\.pixabay\.com/photo/[^"]+)'
-                        matches = re.findall(img_pattern, response.text)
-                        
-                        # Extract unique image URLs
-                        for match in matches:
-                            # Get highest resolution version
-                            base_url = match.split(' ')[0]
-                            if base_url not in image_urls:
-                                image_urls.append(base_url)
-                                if len(image_urls) >= num_images:
-                                    break
-                except Exception as e:
-                    print(f"Error fetching from Pixabay: {e}")
-            
-            # 2. Try Pexels without API
-            if "pexels_free" in sources and len(image_urls) < num_images:
-                try:
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                    }
-                    search_url = f"https://www.pexels.com/search/{query}/"
-                    response = requests.get(search_url, headers=headers)
-                    
-                    if response.status_code == 200:
-                        import re
-                        # Pattern to match Pexels image URLs
-                        img_pattern = r'src="(https://images\.pexels\.com/photos/[^"]+)'
-                        matches = re.findall(img_pattern, response.text)
-                        
-                        for match in matches:
-                            if match not in image_urls:
-                                image_urls.append(match)
-                                if len(image_urls) >= num_images:
-                                    break
-                except Exception as e:
-                    print(f"Error fetching from Pexels: {e}")
-            
-            # 3. Try Unsplash without API
-            if "unsplash_free" in sources and len(image_urls) < num_images:
-                try:
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                    }
-                    search_url = f"https://unsplash.com/s/photos/{query}"
-                    response = requests.get(search_url, headers=headers)
-                    
-                    if response.status_code == 200:
-                        import re
-                        # Pattern to match Unsplash image URLs
-                        img_pattern = r'srcSet="(https://images\.unsplash\.com/photo-[^?]+)'
-                        matches = re.findall(img_pattern, response.text)
-                        
-                        for match in matches:
-                            if match not in image_urls:
-                                image_urls.append(match)
-                                if len(image_urls) >= num_images:
-                                    break
-                except Exception as e:
-                    print(f"Error fetching from Unsplash: {e}")
-            
-            # 4. Fallback to Picsum (Lorem Picsum) for guaranteed images
-            remaining = num_images - len(image_urls)
-            if remaining > 0:
-                for i in range(remaining):
-                    # Random high-quality images
-                    image_urls.append(f"https://picsum.photos/{self.output_size[0]}/{self.output_size[1]}?random={i}")
-            
-            return image_urls
-                
-        except Exception as e:
-            print(f"Error fetching images: {e}")
-            # Fallback to placeholder images
-            return [f"https://picsum.photos/{self.output_size[0]}/{self.output_size[1]}?random={i}" 
-                    for i in range(num_images)]
+        # Simple placeholder image URLs using Lorem Picsum
+        return [f"https://picsum.photos/{self.output_size[0]}/{self.output_size[1]}?random={i}" 
+                for i in range(num_images)]
     
-    def download_image(self, url: str) -> np.ndarray:
+    def download_image(self, url):
         """
         Download an image from a URL and convert to OpenCV format.
         
@@ -210,10 +108,10 @@ class TextToVideoGenerator:
             Image as numpy array
         """
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=10)
             img = Image.open(BytesIO(response.content))
             img = img.resize(self.output_size)
-            return np.array(img)
+            return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         except Exception as e:
             print(f"Error downloading image: {e}")
             # Return a colored blank image
@@ -228,77 +126,113 @@ class TextToVideoGenerator:
             )
             return blank_image
     
-    def create_subtitle_clip(self, text: str, duration: float) -> TextClip:
+    def add_subtitle_to_image(self, image, text):
         """
-        Create a subtitle clip with the specified text.
+        Add subtitle text to an image.
         
         Args:
-            text: Text for the subtitle
-            duration: Duration of the subtitle in seconds
+            image: OpenCV image as numpy array
+            text: Text to add as subtitle
             
         Returns:
-            TextClip object
+            Image with subtitle added
         """
-        # Wrap text to multiple lines if needed
-        wrapped_text = textwrap.fill(text, width=40)
+        # Convert OpenCV image to PIL image for better text handling
+        img_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pil)
         
-                    # Create text clip with shadow for better visibility
+        # Try to use specified font or fall back to default
         try:
-            # First attempt with specified font
-            txt_clip = TextClip(
-                wrapped_text,
-                fontsize=self.font_size,
-                font=self.font,
-                color=self.subtitle_color,
-                stroke_color='black',
-                stroke_width=2,
-                method='caption',
-                size=(self.output_size[0] - 100, None),
-                align='center'
-            ).set_duration(duration)
-        except Exception as e:
-            print(f"Error with specified font: {e}, trying with default font")
-            # Fallback to a system default font if specified font fails
-            try:
-                txt_clip = TextClip(
-                    wrapped_text,
-                    fontsize=self.font_size,
-                    color=self.subtitle_color,
-                    stroke_color='black',
-                    stroke_width=2,
-                    method='caption',
-                    size=(self.output_size[0] - 100, None),
-                    align='center'
-                ).set_duration(duration)
-            except Exception as e2:
-                print(f"Error with default font: {e2}, trying basic method")
-                # Last resort - most basic text method
-                txt_clip = TextClip(
-                    wrapped_text,
-                    fontsize=self.font_size,
-                    color=self.subtitle_color,
-                    method='label',
-                    size=(self.output_size[0] - 100, None),
-                    align='center'
-                ).set_duration(duration)
+            if self.font_path and os.path.exists(self.font_path):
+                font = ImageFont.truetype(self.font_path, self.font_size)
+            else:
+                # Try to use a system font
+                try:
+                    # Default fonts that might be available on different systems
+                    system_fonts = [
+                        "arial.ttf", "Arial.ttf",
+                        "verdana.ttf", "Verdana.ttf",
+                        "times.ttf", "Times New Roman.ttf",
+                        "cour.ttf", "Courier New.ttf"
+                    ]
+                    
+                    # Font directories on different platforms
+                    font_dirs = []
+                    if os.name == 'nt':  # Windows
+                        font_dirs.append(os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts'))
+                    else:  # Linux/Mac
+                        font_dirs.extend([
+                            "/usr/share/fonts",
+                            "/usr/local/share/fonts",
+                            os.path.expanduser("~/.fonts"),
+                            os.path.expanduser("~/Library/Fonts")  # Mac
+                        ])
+                    
+                    # Try to find a usable font
+                    font_found = False
+                    for font_dir in font_dirs:
+                        if os.path.exists(font_dir):
+                            for font_name in system_fonts:
+                                font_path = os.path.join(font_dir, font_name)
+                                if os.path.exists(font_path):
+                                    font = ImageFont.truetype(font_path, self.font_size)
+                                    font_found = True
+                                    break
+                        if font_found:
+                            break
+                    
+                    if not font_found:
+                        # Last resort: use default PIL font
+                        font = ImageFont.load_default()
+                        
+                except Exception:
+                    # If all else fails, use default
+                    font = ImageFont.load_default()
+        except Exception:
+            # If loading TTF fails, use default font
+            font = ImageFont.load_default()
         
-        # Add fade in/out effects for smoother transitions
-        txt_clip = txt_clip.fx(fadein, 0.5).fx(fadeout, 0.5)
+        # Wrap text to fit in image
+        wrapper = textwrap.TextWrapper(width=int(self.output_size[0] * 0.8 / (self.font_size * 0.5)))
+        wrapped_text = wrapper.fill(text)
         
-        # Position at the bottom with some padding
-        return txt_clip.set_position(('center', 'bottom'))
+        # Get text size for positioning
+        bbox = draw.textbbox((0, 0), wrapped_text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # Calculate position (centered at bottom)
+        x = (self.output_size[0] - text_width) // 2
+        y = self.output_size[1] - text_height - 50  # 50px from bottom
+        
+        # Draw text shadow/outline first for better visibility
+        shadow_offset = 2
+        shadow_color = (0, 0, 0)
+        
+        # Draw shadow/outline by drawing text multiple times with offsets
+        for dx, dy in [(-shadow_offset, -shadow_offset), 
+                       (-shadow_offset, 0), 
+                       (-shadow_offset, shadow_offset),
+                       (0, -shadow_offset), 
+                       (0, shadow_offset),
+                       (shadow_offset, -shadow_offset), 
+                       (shadow_offset, 0), 
+                       (shadow_offset, shadow_offset)]:
+            draw.text((x + dx, y + dy), wrapped_text, font=font, fill=shadow_color)
+        
+        # Draw main text
+        draw.text((x, y), wrapped_text, font=font, fill=self.subtitle_color)
+        
+        # Convert back to OpenCV image
+        return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
     
-    def create_video(self, 
-                    text: str, 
-                    keywords: List[str] = None,
-                    segment_duration: float = 5.0,
-                    output_filename: str = "output.mp4") -> str:
+    def create_video(self, text, keywords=None, segment_duration=5, output_filename="output.mp4"):
         """
         Create a video from text with subtitles and background images.
         
         Args:
             text: Input text to convert to video
-            keywords: Keywords for image search (defaults to important words from text)
+            keywords: Keywords for image search (defaults to extracting from text)
             segment_duration: Duration of each text segment in seconds
             output_filename: Name of the output video file
             
@@ -315,70 +249,139 @@ class TextToVideoGenerator:
             words = [word.lower() for word in text.split() if len(word) > 3]
             keywords = list(set([word for word in words if word not in common_words])[:5])
         
+        print("Using keywords:", keywords)
+        
         # Fetch background images
         image_urls = self.fetch_images(keywords, num_images=len(segments))
         
-        # Create video clips for each segment
-        video_clips = []
+        # Set up video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use 'XVID' if MP4 doesn't work
+        fps = 30
+        output_path = os.path.abspath(output_filename)
+        video_writer = cv2.VideoWriter(output_path, fourcc, fps, self.output_size)
         
+        # For each segment, create video frames
         for i, (segment, image_url) in enumerate(zip(segments, image_urls)):
-            # Download and process image
-            img = self.download_image(image_url)
+            print(f"Processing segment {i+1}/{len(segments)}: {segment[:30]}...")
             
-            # Convert OpenCV image to MoviePy format
-            img_clip = ImageClip(img).set_duration(segment_duration)
+            # Download background image
+            background = self.download_image(image_url)
             
-            # Add subtle zoom effect for visual interest
-            zoom_factor = 1.05
-            img_clip = img_clip.resize(lambda t: zoom_factor - (zoom_factor-1)*t/segment_duration)
+            # Add subtitle to image
+            frame = self.add_subtitle_to_image(background, segment)
             
-            # Add fade in/out effects for smoother transitions
-            img_clip = img_clip.fx(fadein, 0.5).fx(fadeout, 0.5)
-            
-            # Create subtitle clip
-            subtitle = self.create_subtitle_clip(segment, segment_duration)
-            
-            # Combine image and subtitle
-            video_clip = CompositeVideoClip([img_clip, subtitle])
-            video_clips.append(video_clip)
+            # Write frames for the duration of the segment
+            num_frames = int(segment_duration * fps)
+            for _ in range(num_frames):
+                video_writer.write(frame)
         
-        # Concatenate all clips
-        final_clip = concatenate_videoclips(video_clips, method="compose")
-        
-        # Write output file
-        output_path = os.path.join(os.getcwd(), output_filename)
-        final_clip.write_videofile(
-            output_path,
-            fps=24,
-            codec='libx264',
-            audio=False,
-            threads=4,
-            preset='medium'
-        )
-        
-        # Clean up MoviePy clips
-        final_clip.close()
-        for clip in video_clips:
-            clip.close()
+        # Release video writer
+        video_writer.release()
+        print(f"Video saved to: {output_path}")
         
         return output_path
 
+def display_menu():
+    """Display interactive menu for the text-to-video generator."""
+    print("\n" + "="*50)
+    print(" SIMPLE TEXT TO VIDEO GENERATOR ".center(50, "="))
+    print("="*50 + "\n")
+    
+    # Get script text
+    print("Enter your script text below (type 'END' on a new line when finished):")
+    lines = []
+    while True:
+        line = input()
+        if line.strip().upper() == 'END':
+            break
+        lines.append(line)
+    
+    script_text = "\n".join(lines)
+    
+    # Get keywords
+    print("\nEnter keywords for image search (comma-separated, or press Enter to extract from text):")
+    keywords_input = input().strip()
+    
+    if keywords_input:
+        keywords = [k.strip() for k in keywords_input.split(',')]
+    else:
+        # Extract keywords from text
+        common_words = {"the", "and", "a", "an", "in", "on", "at", "to", "for", "with", "by", "is", "are", "was", "were"}
+        words = [word.lower() for word in script_text.split() if len(word) > 3]
+        keywords = list(set([word for word in words if word not in common_words])[:5])
+        print(f"Extracted keywords: {', '.join(keywords)}")
+    
+    # Output filename
+    print("\nEnter output filename (default: output.mp4):")
+    output_filename = input().strip()
+    if not output_filename:
+        output_filename = "output.mp4"
+    elif not output_filename.endswith('.mp4'):
+        output_filename += '.mp4'
+    
+    # Subtitle options
+    print("\nSubtitle color (default: white, options: white, yellow, green, red, blue):")
+    subtitle_color_name = input().strip().lower()
+    color_map = {
+        'white': (255, 255, 255),
+        'yellow': (255, 255, 0),
+        'green': (0, 255, 0),
+        'red': (255, 0, 0),
+        'blue': (0, 0, 255)
+    }
+    subtitle_color = color_map.get(subtitle_color_name, (255, 255, 255))
+    
+    print("\nSegment duration in seconds (default: 5.0):")
+    segment_duration_input = input().strip()
+    try:
+        segment_duration = float(segment_duration_input) if segment_duration_input else 5.0
+    except ValueError:
+        segment_duration = 5.0
+        print("Invalid value, using default: 5.0 seconds")
+    
+    # Create generator with selected options
+    generator = SimpleTextToVideo(
+        font_size=40,
+        subtitle_color=subtitle_color
+    )
+    
+    # Display processing message
+    print("\nGenerating video...")
+    print("This may take several minutes depending on the script length.")
+    print("Downloading images and processing text...")
+    
+    # Generate video
+    output_path = generator.create_video(
+        text=script_text,
+        keywords=keywords,
+        segment_duration=segment_duration,
+        output_filename=output_filename
+    )
+    
+    print(f"\nVideo generated successfully!")
+    print(f"Saved as: {output_path}")
+    
+    return output_path
 
 def main():
-    """Main function to handle command line arguments."""
+    """Main function to handle command line arguments or run interactive menu."""
     parser = argparse.ArgumentParser(description='Convert text to video with subtitles')
     parser.add_argument('--text', type=str, help='Input text or path to text file')
     parser.add_argument('--keywords', type=str, help='Keywords for image search (comma separated)')
-    parser.add_argument('--font', type=str, default='Arial-Bold', help='Font for subtitles')
-    parser.add_argument('--font-size', type=int, default=50, help='Font size for subtitles')
     parser.add_argument('--output', type=str, default='output.mp4', help='Output filename')
     parser.add_argument('--segment-duration', type=float, default=5.0, 
                         help='Duration of each text segment in seconds')
-    parser.add_argument('--subtitle-color', type=str, default='white', 
-                        help='Color of subtitles (e.g., white, yellow)')
+    parser.add_argument('--interactive', action='store_true', 
+                        help='Run in interactive mode with guided prompts')
     
     args = parser.parse_args()
     
+    # Check if interactive mode is requested
+    if args.interactive or len(sys.argv) == 1:  # Run interactive if no args or explicitly requested
+        display_menu()
+        return
+    
+    # Command line mode
     # Get input text
     if args.text:
         if os.path.isfile(args.text):
@@ -395,11 +398,7 @@ def main():
         keywords = [k.strip() for k in args.keywords.split(',')]
     
     # Create generator
-    generator = TextToVideoGenerator(
-        font=args.font,
-        font_size=args.font_size,
-        subtitle_color=args.subtitle_color
-    )
+    generator = SimpleTextToVideo()
     
     # Generate video
     print(f"Generating video from text...")
@@ -411,7 +410,6 @@ def main():
     )
     
     print(f"Video generated successfully: {output_path}")
-
 
 if __name__ == "__main__":
     main()
